@@ -1,0 +1,77 @@
+name: Build, Push, Deploy
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    outputs:
+      vehicle-image: ${{ steps.push-vehicle.outputs.image }}
+      auth-image: ${{ steps.push-auth.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Login to ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: Build and push vehicle-api
+        id: push-vehicle
+        run: |
+          REPO_NAME=${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/vehicle-api
+          IMAGE_TAG=${{ github.sha }}
+          docker build -t $REPO_NAME:$IMAGE_TAG ./vehicle-api
+          docker push $REPO_NAME:$IMAGE_TAG
+          echo "::set-output name=image::$REPO_NAME:$IMAGE_TAG"
+
+      - name: Build and push auth-service
+        id: push-auth
+        run: |
+          REPO_NAME=${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/auth-service
+          IMAGE_TAG=${{ github.sha }}
+          docker build -t $REPO_NAME:$IMAGE_TAG ./auth-service
+          docker push $REPO_NAME:$IMAGE_TAG
+          echo "::set-output name=image::$REPO_NAME:$IMAGE_TAG"
+
+  terraform-deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.5.7
+
+      - name: Terraform Init
+        working-directory: terraform
+        run: terraform init
+
+      - name: Terraform Apply
+        working-directory: terraform
+        env:
+          TF_VAR_vehicle_image: ${{ needs.build-and-push.outputs.vehicle-image }}
+          TF_VAR_auth_image: ${{ needs.build-and-push.outputs.auth-image }}
+        run: terraform apply -auto-approve

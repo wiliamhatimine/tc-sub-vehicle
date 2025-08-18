@@ -1,0 +1,29 @@
+services:
+  auth-service:
+    build: ../auth-service
+    ports: ["8081:8081"]
+    environment:
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-U29hdEFUU2ltcGxlU2VjcmV0S2V5MjU2Yml0cy1leGFtcGxlLWp3dC1zZWNyZXQ=}
+
+  vehicle-api:
+    build: .
+    ports: ["8080:8080"]
+    environment:
+      SECURITY_JWT_SECRET: ${AUTH_JWT_SECRET:-U29hdEFUU2ltcGxlU2VjcmV0S2V5MjU2Yml0cy1leGFtcGxlLWp3dC1zZWNyZXQ=}
+    depends_on:
+      - db
+      - auth-service
+  db:
+    image: postgres:latest
+    container_name: vehicle-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: vehicledb
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:
